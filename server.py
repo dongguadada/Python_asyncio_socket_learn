@@ -12,6 +12,8 @@ import random
 import asyncio
 import aiofiles  # pip install aiofiles
 
+time = '3600'
+
 
 async def load_question() -> list:
     d = list()
@@ -30,53 +32,67 @@ async def load_question() -> list:
 
 async def do(reader, writer):
     try:
-        print(time.time())
         data = (await reader.read(1024)).decode()
-        print(time.time())
         address = writer.get_extra_info('peername')
-        print(writer.get_extra_info('socket'))
-        if data == '200':
-            score = 0
-            log.info("客户端IP:{0},端口号:{1}连接服务器成功，准备分发试题".format(address[0], address[1]))
-            question = await load_question()
-            for i, q in enumerate(question):
-                if q["type"] == "chose":
-                    question = str(q["question"])
-                    option1 = str(q["option1"])
-                    option2 = str(q["option2"])
-                    option3 = str(q["option3"])
-                    option4 = str(q["option4"])
-                    answer = str(q["answer"])
-                    sendContent = str(i + 1) + "/10" + question + option1 + option2 + option3 + option4
-                    writer.write(sendContent.encode())
-                    await writer.drain()
-                    if (await reader.read(1024)).decode() == answer:
-                        score += 10
-                        writer.write("回答正确,你目前的分数为{}".format(str(score)).encode())
-                        await writer.drain()
-                    else:
-                        writer.write("回答错误，正确答案为{0},你目前的分数为{1}".format(answer, str(score)).encode())
-                        await writer.drain()
-                else:
-                    question = str(i + 1) + "/10" + str(q["question"])
-                    answer = str(q["answer"])
-                    writer.write(question.encode())
-                    await writer.drain()
-                    if (await reader.read(1024)).decode() == answer:
-                        score += 10
-                        writer.write("回答正确,你目前的分数为{}".format(str(score)).encode())
-                        await writer.drain()
-                    else:
-                        writer.write("回答错误，正确答案为{0},你目前的分数为{1}".format(answer, str(score)).encode())
-                        await writer.drain()
-            log.info("客户端:{0}:{1}考试结束，得分为{2}".format(address[0], address[1], str(score)))
-            writer.write("考试结束，总得分为为{}".format(str(score)).encode())
-            await writer.drain()
-        else:
-            log.error("IP:{0},端口号:{1}连接失败".format(address[0], address[1]))
+        writer.write(time.encode())
+        await writer.drain()
+        score = 0
+        log.info("客户端IP:{0},端口号:{1},学号{2}连接服务器成功，准备分发试题".format(address[0], address[1], data))
+        question = await load_question()
+        for i, q in enumerate(question):
+            if q["type"] == "chose":
+                # 发送类型
+                writer.write("chose".encode())
+                await writer.drain()
+                question = str(q["question"])
+                # 发送问题
+                (await reader.read(1024)).decode()
+                writer.write(question.encode())
+                await writer.drain()
+                # 发送选项加答案
+                (await reader.read(1024)).decode()
+                option1 = str(q["option1"]) + '!'
+                option2 = str(q["option2"]) + '!'
+                option3 = str(q["option3"]) + '!'
+                option4 = str(q["option4"]) + '!'
+                answer = str(q["answer"])
+                chose = option1 + option2 + option3 + option4 + "answer" + answer
+                writer.write(chose.encode())
+                await writer.drain()
+
+                # 接收是否正确
+                t = (await reader.read(1024)).decode()
+                if t == 'T':
+                    score += 10
+                    print(score)
+            else:
+                # 发送类型
+                writer.write("judge".encode())
+                await writer.drain()
+                question = str(q["question"])
+                # 发送问题
+                (await reader.read(1024)).decode()
+                writer.write(question.encode())
+                await writer.drain()
+                # 发送选项加答案
+                (await reader.read(1024)).decode()
+                answer = str(q["answer"])
+                writer.write(answer.encode())
+                await writer.drain()
+
+                # 接收是否正确
+                t = (await reader.read(1024)).decode()
+                if t == 'T':
+                    score += 10
+                    log.info("客户端:{0}:{1},学号{2}当前得分为{3}".format(address[0], address[1], data, str(score)))
+        writer.write("finish".encode())
+        await writer.drain()
+        log.info("客户端:{0}:{1},学号{2}考试结束，得分为{3}".format(address[0], address[1], data, str(score)))
+        async with aiofiles.open('score.txt', 'a', encoding='utf-8') as fp:
+            await fp.write("学号{0}考试结束，得分为{1}".format(data, str(score)))
         writer.close()
     except OSError:
-        print("error")
+        log.error("连接失败")
 
 
 async def main(host: str, port: int):
